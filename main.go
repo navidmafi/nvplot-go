@@ -3,12 +3,12 @@ package main
 import (
 	"log"
 
-	"github.com/diamondburned/gotk4/pkg/gtk/v4"
+	"github.com/gotk3/gotk3/gtk"
 )
 
 func main() {
 	collector, err := NewNVMLCollector()
-
+	gtk.Init(nil)
 	if err != nil {
 		log.Fatal("Error initializing NVML collector:", err)
 	}
@@ -22,14 +22,8 @@ func main() {
 
 	plotter := NewVRAMPlotter(storage, 0, info.TotalMB)
 
-	app := gtk.NewApplication("com.navidmafi.vram-usage", 0)
-	app.ConnectActivate(func() {
-		ui := NewUI(plotter, collector, storage)
-		ui.Run()
-		app.AddWindow(ui.window)
-	})
+	ui := NewUI(plotter, collector, storage)
 
-	if code := app.Run(nil); code > 0 {
-		log.Fatal("Error running application:", code)
-	}
+	ui.Run()
+
 }

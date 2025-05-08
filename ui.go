@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/diamondburned/gotk4/pkg/cairo"
-	"github.com/diamondburned/gotk4/pkg/gtk/v4"
-	"github.com/diamondburned/gotk4/pkg/pango"
+	"github.com/gotk3/gotk3/cairo"
+	"github.com/gotk3/gotk3/glib"
+	"github.com/gotk3/gotk3/gtk"
 )
 
 type UI struct {
@@ -19,52 +19,79 @@ type UI struct {
 }
 
 func NewUI(plotter Plotter, collector *NVMLCollector, storage *DataStorage) *UI {
+	// 1) Initialize GTK (must be first)
+	gtk.Init(nil)
+
 	ui := &UI{
 		plotter:   plotter,
 		collector: collector,
 		storage:   storage,
 	}
 
-	ui.window = gtk.NewWindow()
+	// 2) Create top‐level window
+	w, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	if err != nil {
+		panic("Failed to create window: " + err.Error())
+	}
+	ui.window = w
 	ui.window.SetTitle("GPU Usage")
 	ui.window.SetDefaultSize(800, 600)
 
-	vbox := gtk.NewBox(gtk.OrientationVertical, 0)
+	// 3) Vertical box container
+	vbox, err := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	if err != nil {
+		panic(err)
+	}
 
-	titleLabel := gtk.NewLabel("GPU Usage")
-	titleLabel.SetHAlign(gtk.AlignCenter)
+	// 4) Title label with bold + scale attributes
+	titleLabel, _ := gtk.LabelNew("GPU Usage")
+	titleLabel.SetHAlign(gtk.ALIGN_CENTER)
 	titleLabel.SetMarginTop(10)
 	titleLabel.SetMarginBottom(10)
-	boldAttrlist := pango.NewAttrList()
-	// arrts := []*pango.Attribute{pango.NewAttrWeight(pango.WeightBold), pango.NewAttrScale(1.5)}
-	boldAttrlist.Insert(pango.NewAttrWeight(pango.WeightBold))
-	boldAttrlist.Insert(pango.NewAttrScale(1.5))
-	titleLabel.SetAttributes(boldAttrlist)
 
-	ui.infoLabel = gtk.NewLabel("")
-	ui.infoLabel.SetHAlign(gtk.AlignCenter)
-	ui.infoLabel.SetMarginBottom(10)
+	titleLabel.SetMarkup(`<span weight="bold" size="15000">GPU Usage</span>`)
 
-	ui.drawing = gtk.NewDrawingArea()
-	ui.drawing.SetVExpand(true)
-	ui.drawing.SetDrawFunc(ui.draw)
+	// 5) Info label (initially empty)
+	infoLabel, _ := gtk.LabelNew("")
+	infoLabel.SetHAlign(gtk.ALIGN_CENTER)
+	infoLabel.SetMarginBottom(10)
+	ui.infoLabel = infoLabel
 
-	vbox.Append(titleLabel)
-	vbox.Append(ui.infoLabel)
-	vbox.Append(ui.drawing)
+	// 6) Drawing area and connect draw signal
+	drawing, _ := gtk.DrawingAreaNew()
+	drawing.SetVExpand(true)
+	drawing.Connect("draw", func(da *gtk.DrawingArea, cr *cairo.Context) {
+		// width/height can be queried or passed if needed
+		w, h := da.GetAllocatedWidth(), da.GetAllocatedHeight()
+		ui.plotter.Plot(da, cr, w, h)
+	})
+	ui.drawing = drawing
 
-	ui.window.SetChild(vbox)
+	// 7) Pack widgets into vbox
+	vbox.PackStart(titleLabel, false, false, 0)
+	vbox.PackStart(ui.infoLabel, false, false, 0)
+	vbox.PackStart(ui.drawing, true, true, 0)
+
+	// 8) Add vbox to window
+	ui.window.Add(vbox)
+
+	// 9) Setup destroy handler
+	ui.window.Connect("destroy", func() {
+		gtk.MainQuit()
+	})
 
 	return ui
 }
 
-func (ui *UI) draw(area *gtk.DrawingArea, cr *cairo.Context, width, height int) {
-	ui.plotter.Plot(area, cr, width, height)
-}
-
 func (ui *UI) Run() {
-	ui.window.SetVisible(true)
+	// Show all widgets
+	ui.window.ShowAll()
+
+	// Start background updates
 	go ui.updateData()
+
+	// Enter GTK main loop
+	gtk.Main()
 }
 
 func (ui *UI) updateData() {
@@ -79,12 +106,17 @@ func (ui *UI) updateData() {
 		}
 
 		ui.storage.AddDataPoint(memInfo)
-		ui.updateInfoLabel(memInfo)
-		ui.drawing.QueueDraw()
+
+		// UI updates must run in GTK main thread
+		glib.IdleAdd(func() {
+			ui.updateInfoLabel(memInfo)
+			ui.drawing.QueueDraw()
+		})
 	}
 }
 
 func (ui *UI) updateInfoLabel(memInfo MemoryInfo) {
+	// Use Pango markup
 	ui.infoLabel.SetMarkup(fmt.Sprintf(
 		"<b>Total:</b> %d MB | <b>Used:</b> %d MB | <b>Free:</b> %d MB",
 		memInfo.TotalMB, memInfo.UsedMB, memInfo.FreeMB,

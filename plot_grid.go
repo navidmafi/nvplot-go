@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/diamondburned/gotk4/pkg/cairo"
+	"github.com/gotk3/gotk3/cairo"
 )
 
 func (vp *VRAMPlotter) Grid(cr *cairo.Context, width, height int) {
